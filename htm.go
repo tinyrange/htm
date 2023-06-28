@@ -4,17 +4,40 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"golang.org/x/net/html"
 )
 
 type Node interface {
+	AddClass(class string) error
 	AddChild(node Node) error
 	AddAttribute(key string, value string) error
 }
 
 type htmlNode struct {
-	node *html.Node
+	node      *html.Node
+	classList []string
+}
+
+// AddClass implements Node.
+func (n *htmlNode) AddClass(class string) error {
+	n.classList = append(n.classList, class)
+
+	for i, attr := range n.node.Attr {
+		if attr.Key == "class" {
+			attr.Val = strings.Join(n.classList, " ")
+			n.node.Attr[i] = attr
+			return nil
+		}
+	}
+
+	n.node.Attr = append(n.node.Attr, html.Attribute{
+		Key: "class",
+		Val: strings.Join(n.classList, " "),
+	})
+
+	return nil
 }
 
 // AddAttribute implements Node.
@@ -123,8 +146,66 @@ func Attr(key string, value string) Fragment {
 	return &attr{key: key, value: value}
 }
 
+type DynamicFunc func(ctx context.Context) ([]Fragment, error)
+
+type dynamic struct {
+	handler DynamicFunc
+}
+
+// Children implements Fragment.
+func (d *dynamic) Children(ctx context.Context) ([]Fragment, error) {
+	return d.handler(ctx)
+}
+
+// Render implements Fragment.
+func (d *dynamic) Render(ctx context.Context, parent Node) error {
+	children, err := d.handler(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, child := range children {
+		err := child.Render(ctx, parent)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var (
+	_ Fragment = &dynamic{}
+)
+
+func Dynamic(handler DynamicFunc) Fragment {
+	return &dynamic{handler: handler}
+}
+
+type Class string
+
+// Children implements Fragment.
+func (Class) Children(ctx context.Context) ([]Fragment, error) {
+	return []Fragment{}, nil
+}
+
+// Render implements Fragment.
+func (c Class) Render(ctx context.Context, parent Node) error {
+	parent.AddClass(string(c))
+
+	return nil
+}
+
+var (
+	_ Fragment = Class("")
+)
+
 type topLevel struct {
 	top Node
+}
+
+// AddClass implements Node.
+func (*topLevel) AddClass(class string) error {
+	return fmt.Errorf("cannot add classes to a top level node")
 }
 
 // AddAttribute implements Node.
@@ -145,6 +226,22 @@ func (t *topLevel) AddChild(node Node) error {
 var (
 	_ Node = &topLevel{}
 )
+
+func WalkTree(ctx context.Context, frag Fragment) error {
+	children, err := frag.Children(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, child := range children {
+		err := WalkTree(ctx, child)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
 
 func Render(ctx context.Context, w io.Writer, frag Fragment) error {
 	top := &topLevel{top: nil}
