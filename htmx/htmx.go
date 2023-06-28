@@ -1,7 +1,6 @@
 package htmx
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -13,20 +12,16 @@ import (
 var Script = html.JavaScriptSrc("https://unpkg.com/htmx.org@1.9.2")
 
 func MakeRandomUrl() string {
-	return fmt.Sprintf("/dynamic/u%s", strconv.FormatUint(rand.Uint64(), 36))
+	return fmt.Sprintf("/api/u%s", strconv.FormatUint(rand.Uint64(), 36))
 }
 
 func Post(callback htm.Fragment) htm.Fragment {
 	routeName := MakeRandomUrl()
 
-	return htm.Dynamic(func(ctx context.Context) ([]htm.Fragment, error) {
-		err := htm.RegisterRoute(ctx, routeName, callback)
-		if err != nil {
-			return nil, fmt.Errorf("failed to register route: %v", err)
-		}
-
-		return []htm.Fragment{htm.Attr("hx-post", routeName)}, nil
-	})
+	return htm.Group{
+		htm.Route(routeName, callback),
+		htm.Attr("hx-post", routeName),
+	}
 }
 
 func Target(id html.Id) htm.Fragment {

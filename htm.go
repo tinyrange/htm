@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -108,6 +109,28 @@ func NewHtmlFragment(tag string, children ...Fragment) Fragment {
 	return &htmlFragment{tag: tag, children: children}
 }
 
+type Group []Fragment
+
+// Children implements Fragment.
+func (g Group) Children(ctx context.Context) ([]Fragment, error) {
+	return g, nil
+}
+
+// Render implements Fragment.
+func (g Group) Render(ctx context.Context, parent Node) error {
+	for _, child := range g {
+		err := child.Render(ctx, parent)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var (
+	_ Fragment = Group{}
+)
+
 type Text string
 
 func (Text) Children(ctx context.Context) ([]Fragment, error) {
@@ -150,11 +173,13 @@ type DynamicFunc func(ctx context.Context) ([]Fragment, error)
 
 type dynamic struct {
 	handler DynamicFunc
+	id      uint64
 }
 
 // Children implements Fragment.
 func (d *dynamic) Children(ctx context.Context) ([]Fragment, error) {
-	return d.handler(ctx)
+	// Dynamic trees hide their children so can't create routes.
+	return []Fragment{}, nil
 }
 
 // Render implements Fragment.
@@ -178,7 +203,7 @@ var (
 )
 
 func Dynamic(handler DynamicFunc) Fragment {
-	return &dynamic{handler: handler}
+	return &dynamic{handler: handler, id: rand.Uint64()}
 }
 
 type Class string

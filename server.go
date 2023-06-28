@@ -11,16 +11,34 @@ type key int
 
 var requestKey key
 
+type requestContext struct {
+	request *http.Request
+	routes  map[string]Fragment
+	dynamic bool
+}
+
+func MakeDynamicContext(ctx context.Context) (context.Context, error) {
+	val, ok := ctx.Value(requestKey).(*requestContext)
+	if !ok {
+		return nil, fmt.Errorf("could not get current request context")
+	}
+
+	return context.WithValue(ctx, requestKey, &requestContext{
+		request: val.request,
+		routes:  nil,
+		dynamic: true,
+	}), nil
+}
+
 func RequestFromContext(ctx context.Context) (*http.Request, bool) {
-	val, ok := ctx.Value(requestKey).(*http.Request)
-	return val, ok
+	val, ok := ctx.Value(requestKey).(*requestContext)
+	if !ok {
+		return nil, false
+	}
+	return val.request, true
 }
 
-type routeMux struct {
-	routes map[string]Fragment
-}
-
-func (mux *routeMux) Handle(w http.ResponseWriter, r *http.Request) (bool, error) {
+func (mux *requestContext) Handle(ctx context.Context, w http.ResponseWriter, r *http.Request) (bool, error) {
 	requestPath := r.URL.EscapedPath()
 
 	route, ok := mux.routes[requestPath]
@@ -28,7 +46,12 @@ func (mux *routeMux) Handle(w http.ResponseWriter, r *http.Request) (bool, error
 		return false, nil
 	}
 
-	err := Render(r.Context(), w, route)
+	dynCtx, err := MakeDynamicContext(ctx)
+	if err != nil {
+		return false, nil
+	}
+
+	err = Render(dynCtx, w, route)
 	if err != nil {
 		return true, err
 	}
@@ -36,27 +59,43 @@ func (mux *routeMux) Handle(w http.ResponseWriter, r *http.Request) (bool, error
 	return true, err
 }
 
-var routeKey key
+type route struct {
+	url      string
+	fragment Fragment
+}
 
-func RegisterRoute(ctx context.Context, url string, fragment Fragment) error {
-	val, ok := ctx.Value(routeKey).(*routeMux)
+func (r *route) Children(ctx context.Context) ([]Fragment, error) {
+	val, ok := ctx.Value(requestKey).(*requestContext)
 	if !ok {
-		return fmt.Errorf("could not get route mux")
+		return nil, fmt.Errorf("could not get request context")
 	}
 
-	val.routes[url] = fragment
+	val.routes[r.url] = r.fragment
 
+	return []Fragment{}, nil
+}
+
+func (*route) Render(ctx context.Context, parent Node) error {
+	// Routes are invisible.
 	return nil
+}
+
+var (
+	_ Fragment = &route{}
+)
+
+func Route(url string, f Fragment) Fragment {
+	return &route{url: url, fragment: f}
 }
 
 func ListenAndServe(addr string, f Fragment) error {
 	return http.ListenAndServe(addr, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		routeMux := &routeMux{
-			routes: make(map[string]Fragment),
+		reqCtx := &requestContext{
+			request: r,
+			routes:  make(map[string]Fragment),
 		}
 
-		ctx := context.WithValue(r.Context(), requestKey, r)
-		ctx = context.WithValue(ctx, routeKey, routeMux)
+		ctx := context.WithValue(r.Context(), requestKey, reqCtx)
 
 		err := WalkTree(ctx, f)
 		if err != nil {
@@ -65,7 +104,7 @@ func ListenAndServe(addr string, f Fragment) error {
 			return
 		}
 
-		handled, err := routeMux.Handle(w, r)
+		handled, err := reqCtx.Handle(ctx, w, r)
 		if err != nil {
 			log.Printf("failed to handle special route: %v", err)
 			http.Error(w, "failed to handle special route", http.StatusInternalServerError)
