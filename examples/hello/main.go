@@ -16,7 +16,7 @@ func main() {
 			h.JavaScriptSrc("https://unpkg.com/htmx.org@1.9.2"),
 		),
 		h.Body(
-			h.Div(htm.Text("Hello, World")),
+			h.Div(h.Url()),
 		),
 	))
 	if err != nil {
