@@ -20,7 +20,6 @@ func main() {
 		h.Head(
 			h.Title("Hello, World"),
 			h.JavaScriptSrc("https://cdn.tailwindcss.com"),
-			h.JavaScriptSrc("https://unpkg.com/htmx.org@1.9.2"),
 		),
 		h.Body(
 			h.Div(tw.Container,
